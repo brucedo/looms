@@ -3,6 +3,8 @@
 """
 Module used to store the settings of the package manager's front end.  Stores the following values:
 
+# Directory path where the common api modules are located.  Added to the sys.path variable before api module import.
+libpath = path
 # Topmost directory under which all repositories are stored.
 root = path
 # Sets globally whether the whitelist can be overridden by missing dependencies.
@@ -54,6 +56,7 @@ import pwd
 import grp
 
 root = '/srv/pkg_manager'
+libpath = '/usr/local/lib/looms/lib'
 repositories = {}
 keypath = '/etc/pkg_manager/keys'
 public_keyring = 'pubring.gpg'
@@ -87,6 +90,7 @@ def load_conf(path):
 
     global repositories
     global root
+    global libpath
     global keypath
     global public_keyring
     global private_keyring
@@ -153,6 +157,14 @@ def load_conf(path):
                 root = value
             else:
                 repositories[section]['root'] = value
+        # libpath keyword (global specific)
+        elif keyword == 'libpath':
+            if section == 'Global':
+                libpath = value
+            else:
+                retval = -2
+                print('Conf setting libpath in non-Global section of config file.')
+                break
         # Keypath keyword (also shared between repos and global)
         elif keyword == 'key_path':
             if section == 'Global':
