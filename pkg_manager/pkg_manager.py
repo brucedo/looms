@@ -42,8 +42,6 @@ specified then the mirror is added to all repositories.
 """
 
 import conf.pkg_manager
-import api.updated_pkg_data
-
 import mysql.connector
 import sys
 import importlib
@@ -412,6 +410,7 @@ def update_database(api_pkg_data, repository_name):
     :return:
     """
 
+    global logger
     # Establish our MySQL db connection.
     connection = mysql.connector.connect(option_files='/etc/pkg_manager/db_info/options.cnf')
     cursor = connection.cursor()
@@ -437,8 +436,8 @@ def update_database(api_pkg_data, repository_name):
             update_type = 'add'
 
         # Package is now guaranteed to be in packages table.  Next, we want to see if the package version
-        # has already been added INTO the table, perhaps as part of a scan from another machine with a newer version
-        # of the image that was marked as provisional.
+        # has already been added INTO the history table, perhaps as part of a scan from another machine with
+        # a newer version of the image that was marked as provisional.
         print('Package {0} may already have had version {1} added to the db.  Testing...'.format(pkg[0], pkg[3]))
         query = """SELECT COUNT(*) FROM package AS p LEFT JOIN package_history AS ph
                    ON p.id = ph.package_id
@@ -464,6 +463,19 @@ def update_database(api_pkg_data, repository_name):
                        WHERE p.package_name = %s AND p.package_type = %s AND p.contents = %s AND ph.version = %s"""
             print('Query: {0}'.format(query % (pkg[4], update_type, repository_name, pkg[0], pkg[1], pkg[2], pkg[3])))
             cursor.execute(query, (pkg[4], update_type, repository_name, pkg[0], pkg[1], pkg[2], pkg[3]))
+
+        # MySQL documentation suggests that insert ... select on duplicate update type statements are considered
+        # unsafe, as it's not possible to guarantee the order of items pulled from a select and therefore insertions
+        # cannot guarantee a deterministic order for unique key constraint violation.  However, I think this will
+        # be safe, because there should only ever be ONE result returned from the select subquery.
+        logger.debug('Attempting insert/update on duplicate key query for '
+                     'package {0}, version {1}'.format(pkg[0], pkg[3]))
+        query = """INSERT INTO current_package_versions (package_id, package_history_id)
+                    SELECT p.id AS package_id, ph.id AS package_history_id
+                    FROM package AS p LEFT JOIN package_history AS ph ON p.id = ph.package_id
+                    WHERE p.package_name = %s AND p.package_type = %s AND p.contents = %s AND ph.version = %s
+                    ON DUPLICATE KEY UPDATE package_history_id = ph.id"""
+        cursor.execute(query, (pkg[0], pkg[1], pkg[2], pkg[3]))
 
         # commit the package updates and close the connection.
         connection.commit()
@@ -496,6 +508,10 @@ def main():
     if conf_result != 0:
         print("Error reading configuration file {0} - error code {1}".format(conf_file, conf_result))
         exit(conf_result)
+
+    # set our libpath onto the end of the sys libpath and import the looms api modules.
+    sys.path.append(conf.pkg_manager.libpath)
+    import data_api.updated_pkg_data
 
     # Configuration file is loaded - get logging configured next.
     setup_logs()
