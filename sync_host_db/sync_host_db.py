@@ -218,6 +218,12 @@ def clear_update_history(hostname, domain):
     connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
     cursor = connection.cursor()
 
+    # Need to remove both the host_update_history AND the host_package_versions entries.
+    query = """DELETE hpv FROM host AS h LEFT JOIN host_package_versions AS hpv ON h.id = hpv.host_id
+               WHERE h.name = %s AND h.domain = %s"""
+
+    cursor.execute(query, (hostname, domain))
+
     query = """DELETE huh FROM host AS h LEFT JOIN host_update_history AS huh ON h.id = huh.host_id
                WHERE h.name = %s and h.domain = %s"""
 
