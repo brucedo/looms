@@ -214,12 +214,6 @@ def get_target_dpkg(target):
 
     logger.debug('Beginning dpkg list of target {0}.'.format(target))
 
-    # subprocess.popen() must be invoked
-    # proc = subprocess.Popen(shlex.split(cmd_string),
-    #                        stdin=subprocess.PIPE,
-    #                        stdout=subprocess.PIPE,
-    #                        stderr=subprocess.PIPE)
-
     try:
         stdout = subprocess.check_output(shlex.split(cmd_string))
     except subprocess.CalledProcessError as cperr:
@@ -229,7 +223,6 @@ def get_target_dpkg(target):
         stdout = cperr.output
 
     logger.debug('Subprocess run, output captured.')
-
 
     return stdout
 
@@ -532,6 +525,18 @@ def insert_pkg_host_association(machine_name, pkg_data_list, machine_data):
     logger.debug('Query: {0}'.format(query % (hostname, domain, pkg_name, pkg_contents, pkg_type, pkg_version, pkg_name, pkg_version)))
 
     cursor.execute(query, (hostname, domain, pkg_name, pkg_contents, pkg_type, pkg_version, pkg_name, pkg_version))
+
+    # We have the host->package version association created in the history table.  We need the same in the
+    # host_package_versions table, because that IS the currently known package version associated with this host.
+    query = """INSERT INTO host_package_versions (host_id, package_id, package_history_id)
+               SELECT h.id, p.id, ph.id
+               FROM host AS h, package_history AS ph LEFT JOIN package AS p ON ph.package_id = p.id
+               WHERE h.name = %s AND h.domain = %s AND p.package_name = %s AND p.contents = %s
+               AND p.package_type = %s AND ph.version = %s
+               ON DUPLICATE KEY UPDATE package_history_id = ph.id"""
+    cursor.execute(query, (hostname, domain, pkg_name, pkg_contents, pkg_type, pkg_version))
+
+    # Commit the changes made.
     connection.commit()
 
     cursor.close()
