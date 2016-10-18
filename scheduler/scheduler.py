@@ -311,12 +311,10 @@ class UpdateHosts(Job):
         super(UpdateHosts, self).__init__()
 
         self.script_path = '/data/programs/usr/local/bin/update_linux_hosts/update_hosts.py'
-        self.query = """SELECT COUNT(*) AS count FROM host_package_versions AS hpv
-                        LEFT JOIN current_package_versions AS cpv
-                        ON cpv.package_name = hpv.package_name AND cpv.package_contents = hpv.contents
-                        LEFT JOIN host AS h ON hpv.name = h.name
-                        WHERE cpv.event_date > hpv.event_date AND h.last_checkin > %s
-                        AND (h.last_update < CURRENT_TIMESTAMP() - INTERVAL 1 DAY)"""
+        self.query = """SELECT COUNT(*) AS count
+                        FROM host_package_versions AS hpv
+                        LEFT JOIN current_package_versions AS cpv ON cpv.package_id = p.id
+                        WHERE cpv.package_history_id != hpv.package_history_id"""
 
     def run(self):
         """
