@@ -127,12 +127,13 @@ def get_outdated_systems():
     logger.debug('Executing query to get list of systems that have outdated packages...')
 
     # Here's the query - it's a doozy.
-    query = """SELECT DISTINCT hpv.name AS machine_name, hpv.domain AS domain
+    query = """SELECT DISTINCT h.name AS machine_name, h.domain AS domain
                FROM host_package_versions AS hpv
-               LEFT JOIN current_package_versions AS cpv ON cpv.package_name = hpv.package_name
-               AND cpv.package_contents = hpv.contents
-               LEFT JOIN host AS h ON hpv.name = h.name
-               WHERE cpv.event_date > hpv.event_date AND h.last_checkin > %s
+               LEFT JOIN host AS h ON hpv.host_id = h.id
+               LEFT JOIN package_history AS ph ON hpv.package_history_id = ph.id
+               LEFT JOIN package AS p ON ph.package_id = p.id
+               LEFT JOIN current_package_versions AS cpv ON cpv.package_id = p.id
+               WHERE cpv.package_history_id != hpv.package_history_id AND h.last_checkin > %s
                AND (h.last_update < CURRENT_TIMESTAMP() - INTERVAL 1 DAY)"""
 
     # Get the date and time of now minus 1 day.
@@ -407,10 +408,25 @@ def insert_host_pkg_update(host_dict):
                        package_history AS ph ON p.id = ph.package_id WHERE p.package_name = %s AND
                        ph.version = %s)"""
 
-            # Extract the specific variable data we need.
+            # I'm sure that query is terrible and can be fixed.  Later...
+            # Note that we are missing a unique package type identifier in this mess.  This needs fixing before
+            # we can even dream of generalizing.
             pkg_type = 'debian'
 
             cursor.execute(query, (hostname, domain, package, arch, pkg_type, version, package, version))
+
+            # Now to update the host_package_versions table so that it points to the new package.  The host_id and
+            # package_history_id columns form a unique key, so we can use the ON DUPLICATE KEY syntax to update the
+            # package_history_id field so long as we can guarantee a single row return through the select.
+
+            query = """INSERT INTO host_package_versions (host_id, package_id, package_history_id)
+                       SELECT h.id, p.id, ph.id
+                       FROM host AS h, package_history AS ph LEFT JOIN package AS p ON ph.package_id = p.id
+                       WHERE h.name = %s AND h.domain = %s AND p.package_name = %s AND p.contents = %s
+                       AND p.package_type = %s AND ph.version = %s
+                       ON DUPLICATE KEY UPDATE package_history_id = ph.id"""
+
+            cursor.execute(query, (hostname, domain, package, arch, pkg_type, version))
             connection.commit()
 
         # Update the host table so that the updated field matches the current timestamp.
@@ -420,8 +436,6 @@ def insert_host_pkg_update(host_dict):
 
     cursor.close()
     connection.close()
-
-
 
 
 def main():
