@@ -24,7 +24,7 @@ allowed_opts = ['log_level', 'update_host_db_log_path', 'db_name', 'db_pass',
 config = {}
 
 
-def read_config():
+def read_config(path='/etc/looms/update_host_db.conf'):
     """
     Reads the config file located in /etc/update_linux_hosts.  Config file currently consists of password related
     options and some logging odds and ends.  Config file is standard ini file style - option = value.  Note that
@@ -36,7 +36,7 @@ def read_config():
     global allowed_opts
 
     # Attempt to open the config file.
-    fstream = open('/etc/update_linux_hosts/update_host_db.conf', 'r')
+    fstream = open(path, 'r')
 
     data = fstream.read()
     fstream.close()

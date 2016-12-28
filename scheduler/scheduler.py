@@ -9,16 +9,77 @@ timed to start relative to the end of the last job OR on an absolute schedule, f
 on absolute, and with better time resolution than "hourly".
 """
 
+import datetime
+import time
 import os
 import os.path
+import logging
+import logging.handlers
 import sys
-import subprocess
-import shlex
-import datetime
-import abc
-import time
-import mysql.connector
-import mysql.connector.errors
+import signal
+import atexit
+from looms.lib.jobs.PackageUpdater import PackageUpdater
+from looms.lib.jobs.HostPackageScan import HostPackageScan
+from looms.lib.jobs.UpdateHostDBEntry import UpdateHostDBEntry
+from looms.lib.jobs.UpdateHosts import UpdateHosts
+
+# Set a few globals here.  At the moment we're not reading in any config files when we start, which should be fixed.
+# however, until then, we'll just cheap out and set some globals.
+pidfile = '/var/run/looms/scheduler.pid'
+logfile = '/var/log/looms/scheduler.log'
+logger = None
+
+
+def setup_logs():
+    """
+    Configures the logging module to handle our log output based on the information read in from the config file.
+
+    :return: False if the logging utility fails configuration.
+             True if the logging utility successfully configures the log file output.
+    """
+
+    global logfile
+    global pidfile
+    global logger
+
+    # Check to confirm that the path to logfile exists.
+    if not os.path.isdir(os.path.dirname(logfile)):
+        os.makedirs(os.path.dirname(logfile))
+
+    # Creates rotating file handler, with a max size of 10 MB and maximum of 5 backups, if path configured.
+    handler = logging.handlers.RotatingFileHandler(logfile, mode='a',
+                                                   maxBytes=10485760, backupCount=5)
+
+    if handler is None:
+        print("A serious error occurred while attempting to create the logging handler.")
+        return False
+
+    # Create formatter...
+    formatter = logging.Formatter(fmt='%(levelname)s %(asctime)s: %(name)s - %(module)s.%(funcName)s - %(message)s')
+    handler.setFormatter(formatter)
+    # now set log level, and configure the loggers for each imported local package (including gnupg.)
+    log_level = logging.DEBUG
+
+    # create the logger for main, and set up the loggers for each of the supporting modules:
+    logger = logging.getLogger(__name__)
+    logger.addHandler(handler)
+    logger.setLevel(log_level)
+
+    if logger is None:
+        print("A serious error occurred while attempting to generate a logger object.")
+        return False
+
+    return True
+
+
+def print_help():
+    """
+    Prints the help screen when a startup syntax error occurs.
+    :return:
+    """
+
+    print("Looms Scheduler Daemon")
+    print("Usage: scheduler.py [start|stop|restart]")
 
 
 def main():
@@ -27,32 +88,56 @@ def main():
     :return:
     """
 
-    # start daemonizing.
+    global logger
+    # init the log output.
+    setup_logs()
+
+    # Check to see what arguments have been passed - accepts start, stop and restart.  For now assume it's the second
+    # item in the passed array.
+    try:
+        action = sys.argv[1]
+    except IndexError as e:
+        print_help()
+        sys.exit(1)
+
+    # We know we have an action, so check the action type and proceed once execution is complete.  We know that we're
+    # the double child no matter the event because the parent procs all explicitly exited.
+    if action.lower() == 'start':
+        if start() != 0:
+            sys.exit(1)
+    elif action.lower() == 'stop':
+        stop()
+    elif action.lower() == 'restart':
+        if restart() != 0:
+            sys.exit(1)
+    else:
+        print_help()
+        sys.exit(1)
 
     # Assume that this is a properly separated daemon (double forked for paranoia.)  Now begin on the scheduling.
 
     # Normally we'd read in scheduling data and config from files.  This is a trivial scheduler basically designed
     # as a monotasker to run our system environment, so we'll do our config in script and fix everything right later.
-    pkg_updater = PackageUpdater()
+    pkg_updater = PackageUpdater.PackageUpdater()
     # Set the timer_base to be today at midnight.
     pkg_updater.timer_base = datetime.datetime.combine(datetime.datetime.today(), datetime.time(0, 0))
     pkg_updater.timer_type = 'absolute'
     pkg_updater.timer = datetime.timedelta(hours=24)
     pkg_updater.update_next_run()
 
-    pkgscan = HostPackageScan()
+    pkgscan = HostPackageScan.HostPackageScan()
     pkgscan.timer_base = datetime.datetime.now()
     pkgscan.timer_type = 'relative'
     pkgscan.timer = datetime.timedelta(minutes=5)
     pkgscan.update_next_run()
 
-    update_host_db = UpdateHostDBEntry()
+    update_host_db = UpdateHostDBEntry.UpdateHostDBEntry()
     update_host_db.timer_base = datetime.datetime.now()
     update_host_db.timer_type = 'relative'
     update_host_db.timer = datetime.timedelta(minutes=5)
     update_host_db.update_next_run()
 
-    update_hosts = UpdateHosts()
+    update_hosts = UpdateHosts.UpdateHosts()
     update_hosts.timer_base = datetime.datetime.now()
     update_hosts.timer_type = 'relative'
     update_hosts.timer = datetime.timedelta(minutes=5)
@@ -74,9 +159,175 @@ def main():
 
         # Pop job off the top of the queue.
         job = schedule.pop(0)
-        print("Running job {0}".format(job.script_path))
+        logger.debug("Running job {0}".format(job.script_path))
         job.run()
         insert_job(job, schedule)
+
+
+def start():
+    """
+    When the program is called with the 'start' argument, check to see if the scheduler is already running (pidfile
+    check) and start if not.  If it is, then exit out.  Note that we do not clean up the pidfile here - if there is
+    another instance of the daemon already running then we don't want to bork everything up.  The daemon is responsible
+    for itself, the pre-forks are not.
+
+    :return:
+             Nonzero value if the daemon could not be started because it was already running.
+             Zero value if the daemon started successfully.
+    """
+
+    global pidfile
+    global logger
+
+    if os.path.exists(pidfile):
+        # pidfile exists, so either a dirty shutdown occurred and the pidfile was not cleansed, or else a process
+        # is already running.  Read the file to get the pid, and then exit out reporting that pid to logger.
+        pid_fd = open(pidfile, 'r')
+        pid = pid_fd.read()
+        logger.error('Unable to start daemon - pidfile {0} exists and contains pid {1}.'.format(pidfile, pid))
+        return 1
+
+    # otherwise pidfile does not exist, so we initiate the daemon.
+    daemonize()
+
+    return 0
+
+
+def stop():
+    """
+    When the program is called with the stop argument, check to see if the scheduler is running.  If so, issue a kill
+    command on the pid found in pidfile.
+    :return:
+    """
+
+    global pidfile
+    global logger
+
+    # Check to see if the pidfile exists.
+    if os.path.exists(pidfile):
+        # file exists, process may.  Get pid and issue halt.
+        try:
+            pid_fd = open(pidfile, 'r')
+            pid = pid_fd.read()
+        except OSError as e:
+            logger.error("An error occurred while attempting to open pid file "
+                         "{0} - {1}: {2}".format(pidfile, e.errno, e.message))
+            return 1
+        except IOError as e:
+            logger.error("An error occurred while attempting to read pid file "
+                         "{0} - {1}: {2}".format(pidfile, e.errno, e.message))
+            return 1
+
+        # simple sanity check - make sure the pidfile contents aren't borked.
+        if not pid.isdigit():
+            logger.error('Contents of pidfile {0} are non-numeric: {1}'.format(pidfile, pid))
+            return 1
+
+        # pidfile exists, process ID is present.  Attempt to shut down process; try for 15 seconds before calling it.
+        timer_start = 0
+        while pid in os.listdir('/proc') and timer_start < 15:
+            os.kill(int(pid), signal.SIGTERM)
+            time.sleep(1)
+            timer_start += 1
+
+        if timer_start >= 15:
+            logger.error('Could not shut down process {0} - SIGTERM ignored!')
+            return 1
+
+        return 0
+
+
+def restart():
+    """
+    When the program is started with the restart option, attempt to stop the existing process and then start it again.
+    The function shortcuts itself to the end; that is, if the process reports an error when attempting to stop the
+    daemon, then no attempt to start the daemon is made.
+
+    :return: 0 if the daemon could be stopped and then started successfully - 1 if the daemon failed either option.
+    """
+
+    global logger
+
+    success = stop()
+
+    if not success:
+        logger.error('Unable to stop daemon - rejecting start attempt.')
+        return 1
+
+    success = start()
+
+    if not success:
+        logger.error('Daemon appears to have stopped, but is not starting.')
+        return 1
+
+
+def daemonize():
+    """
+    Performs the tasks necessary to convert the script into a long running daemon - forks the process (twice), sets
+    cwd to root, sets umask to 0, and redirects stdin, stdout and stderr to /dev/null.  The pidfile is written out
+    to /var/looms, and atexit.register is called to set automatic deletion of the pidfile in the event of daemon
+    shutdown.
+    :return:
+    """
+
+    global logger
+
+    try:
+        pid = os.fork()
+    except OSError as e:
+        logger.error("Fork attempt 1 failed.  Error code {0}, message {1}".format(e.errno, e.message))
+        sys.exit(1)
+
+    # If the returned PID is nonzero, then this is the parent and the PID is that of the child.  Exit out.
+    if pid > 0:
+        sys.exit(0)
+
+    # Change working directory to / so that, in the event of system shutdown, our daemon is not dwelling on a
+    # mounted volume that can't be brought down.
+    os.chdir('/')
+    # Create new session group, of which this process will be the leader..
+    os.setsid()
+    # Set umask to 0 so there is no interference should we need to create files.  We must be sure to properly
+    # set and secure ALL created files by ourselves after this.
+    os.umask(0)
+
+    # Redaemonize to put the child into a leaderless session group (parent was leader and it exited.)
+    try:
+        pid = os.fork()
+    except OSError as e:
+        logger.error("Fork attempt 2 failed.  Error code {0}, message {1}".format(e.errno, e.message))
+        sys.exit(1)
+
+    if pid > 0:
+        sys.exit(0)
+
+    # Flush anything sitting in stdout or stderr pipes.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # and then redirect them to /dev/null.
+    stdin = open('/dev/null', 'r')
+    stdout = open('/dev/null', 'a+')
+    stderr = open('/dev/null', 'a+', 0)
+    os.dup2(stdin.fileno(), sys.stdin.fileno())
+    os.dup2(stdout.fileno(), sys.stdout.fileno())
+    os.dup2(stderr.fileno(), sys.stderr.fileno())
+
+    # Finally, register a pid deletion routine with atexit, and then create our pidfile
+    atexit.register(delete_pidfile)
+    pid = str(os.getpid())
+    pid_fd = open(pidfile, 'w+')
+    pid_fd.write(pid + "\n")
+    pid_fd.close()
+
+
+def delete_pidfile():
+    """
+    Deletes the pidfile specified by global pidfile, if it exists.
+    :return:
+    """
+
+    if os.path.exists(pidfile):
+        os.remove(pidfile)
 
 
 def insert_job(job, schedule_list):
@@ -104,248 +355,6 @@ def insert_job(job, schedule_list):
 
     return schedule_list
 
-
-class Job(object):
-    """
-    Job class defines a simple interface in which jobs are stored, and provide simple functionality like providing
-    a datetime object marking when the job should next be run (for easy insertion back into the queue to reup the
-    task) and time remaining from current time before this job should be run (so the queue manager can easily
-    determine how long it needs to sleep for.)
-    """
-
-    def __init__(self):
-        __metaclass__ = abc.ABCMeta
-        """
-        Sets up an empty job.
-        :return:
-        """
-
-        # The type of timer - relative to current time, or absolute.
-        self.timer_type = ''
-        # The actual timer - a timedelta object indicating the time gap between runs of the job.
-        self.timer = None
-        # Timer base - with an absolute type, the base never changes.  With relative, the base can (but does not
-        # necessarily) change to be the most recent end time of the job.  The base _can_ be used to calculate the
-        # next run time by the job.
-        self.timer_base = None
-        # The datetime object representing when the job will next run.
-        self.next_run_time = None
-
-    @abc.abstractmethod
-    def run(self):
-        """
-        Job runner for class.  Abstract, must be instantiated by an actual job in order to handle the necessary
-        logic checks for whether a job should go ahead or not.
-        :return:
-        """
-
-    def update_next_run(self):
-        """
-        Updates the next run time object to the next absolute time the task should run again (note that this stores
-        an absolute time regardless of whether the timer_type is relative or not, but the absolute time that is
-        stored IS affected by the timer_type.
-        :return:
-        """
-
-        if self.timer_type == 'absolute':
-            self.timer_base += self.timer
-            self.next_run_time = self.timer_base + self.timer
-        else:
-            self.next_run_time = datetime.datetime.now() + self.timer
-
-    def get_next_run_time(self):
-        """
-        Returns a datetime object indicating the next time the job should be run, with respect to either it's
-        absolute runtime or its relative run time.
-        :return:
-        """
-
-        return self.next_run_time
-
-    def get_next_run_delta(self):
-        """
-        Returns a timedelta object relative to current time indicating when the job should be run.
-        :return:
-        """
-
-        # Take the next run time and subtract the current datetime.  This guarantees a negative timedelta if
-        # the current time has surpassed the next_run_time.
-        return self.next_run_time - datetime.datetime.now()
-
-
-class PackageUpdater(Job):
-    """
-    Subclass of Job; responsible for calling the package update process.  No logic in place prevents the package
-    updater from running.
-    """
-
-    def __init__(self):
-        """
-        Initializes PackageUpdater.
-        :return:
-        """
-
-        super(PackageUpdater, self).__init__()
-
-        self.script_path = '/data/programs/usr/local/bin/pkg_manager/pkg_manager.py'
-
-    def run(self):
-        """
-        Executes the package manager.
-        :return:
-        """
-
-        print("Running the Package Updater script at datetime: {0}".format(datetime.datetime.now()))
-
-        subprocess.call(shlex.split(self.script_path))
-
-        self.update_next_run()
-
-
-class HostPackageScan(Job):
-    """
-    Subclass of Job; responsible for calling the system package scan whenever there are hosts in the host table
-    with no entries in host_update_history.
-    """
-
-    def __init__(self):
-        """
-        Initializes HostPackageScan.
-        :return:
-        """
-
-        super(HostPackageScan, self).__init__()
-
-        self.query = """SELECT h.name, h.domain FROM host AS h
-                   LEFT OUTER JOIN host_update_history AS huh ON h.id = huh.host_id
-                   WHERE huh.id IS NULL;"""
-        self.script_path = '/data/programs/usr/local/bin/update_linux_hosts/pkgscan_linux_host.py'
-
-    def run(self):
-        """
-        Checks to see if the database has any systems named in the hosts table that do NOT have any package
-        entries in host_update_history, and if so adds those system's names to a list and calls pkg_scan_linux_host.py
-        with them as an argument.
-        :return:
-        """
-
-        print("Running the host package scan at datetime: {0}".format(datetime.datetime.now()))
-
-        connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
-        cursor = connection.cursor()
-
-        cursor.execute(self.query)
-
-        # Execute the query
-        machine_list = []
-        for (machine_name, domain) in cursor:
-            machine_list.append(machine_name + '.' + domain)
-
-        if len(machine_list) <= 0:
-            print("No machines in the database require package scanning.")
-            return
-
-        # Remove any extraneous commas.
-        machine_str = ','.join(machine_list)
-
-        print("Found machines {0} to scan.".format(machine_str))
-
-        cmd = self.script_path + ' ' + machine_str
-
-        subprocess.call(shlex.split(cmd))
-
-        self.update_next_run()
-
-        cursor.close()
-        connection.close()
-
-
-class UpdateHostDBEntry(Job):
-    """
-    Subclass of Job class; responsible for calling the update_host_db script whenever there is data to be consumed
-    out of the /data/call_home/registered_hosts file.
-    """
-
-    def __init__(self):
-        """
-        Initializes UpdateHostDBEntry class.
-        :return:
-        """
-
-        super(UpdateHostDBEntry, self).__init__()
-
-        self.script_path = '/data/programs/usr/local/bin/update_linux_hosts/update_host_db.py'
-        self.data_file = '/data/call_home/registered_hosts'
-
-    def run(self):
-        """
-        Checks to see if the /data/call_home/registered_hosts has data in it, and if so calls the
-        update_host_db script to add/update systems.
-        :return:
-        """
-
-        print("Running Update Host DB Entry job at datetime {0}".format(datetime.datetime.now()))
-
-        file_stats = os.stat(self.data_file)
-
-        if file_stats.st_size > 0:
-            print("There are records in the php output!")
-            subprocess.call(shlex.split(self.script_path))
-
-        # Update the next run time...
-        self.update_next_run()
-
-
-class UpdateHosts(Job):
-    """
-    Subclass of the Job class, intended to perform a database check for any host systems that are missing updates
-    and run the host_update script.
-    """
-
-    def __init__(self):
-        """
-        Initializes the UpdateHosts class.
-        :return:
-        """
-
-        super(UpdateHosts, self).__init__()
-
-        self.script_path = '/data/programs/usr/local/bin/update_linux_hosts/update_hosts.py'
-        self.query = """SELECT COUNT(*) AS count
-                        FROM host_package_versions AS hpv
-                        LEFT JOIN current_package_versions AS cpv ON cpv.package_id = p.id
-                        WHERE cpv.package_history_id != hpv.package_history_id"""
-
-    def run(self):
-        """
-        Implementation of abstract run method from base.  When called, it attempts to run the job update_hosts job
-        iff the query returns a non-zero number of systems that are out of date.
-        :return:
-        """
-
-        print("Running Update Host with new packages at datetime {0}".format(datetime.datetime.now()))
-
-        # Open connection to database.
-        connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
-        cursor = connection.cursor()
-
-        # Date and time to check - now, but less a day.
-        check_date = datetime.datetime.now() - datetime.timedelta(days=1)
-
-        cursor.execute(self.query, (check_date, ))
-
-        exists = cursor.fetchone()[0]
-
-        if exists > 0:
-            print("There are out of date systems!!!")
-            subprocess.call(shlex.split(self.script_path))
-
-        # Update the next run time.
-        self.update_next_run()
-
-        # Close db connection
-        cursor.close()
-        connection.close()
 
 # run on main boilerplate.
 if __name__ == "__main__":

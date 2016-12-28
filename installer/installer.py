@@ -126,7 +126,15 @@ def print_exec_error():
           'default of /etc/looms.')
 
 
-def parse_conf
+def parse_conf(fname):
+    """
+    Takes the name of a configuration file and parses it, looking for information that will tell it where existing
+    installed files may be found for replacement.  Focus is on finding the
+    :param fname:
+    :return:
+    """
+
+
 
 
 def main():
@@ -149,7 +157,7 @@ def main():
 
     # Check to see if a config file exists:
     try:
-        conf_fstream = open(conf_file)
+
         parse
     except IOError:
         # No config file.  This is not the end of the world - it may just mean that this is a first-time install.
