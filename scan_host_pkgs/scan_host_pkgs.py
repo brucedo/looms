@@ -17,6 +17,8 @@ import shlex
 import mysql.connector
 import mysql.connector.errors
 import json
+import os
+import os.path
 
 config = {}
 logger = None
@@ -38,8 +40,13 @@ def setup_logging():
 
     # Creates rotating file handler, with a max size of 10 MB and maximum of 5 backups, if path configured.
     if config['log_path'] != '':
+        # Test to be sure that the path exists; create if not.
+        log_dir = os.path.split(config['log_path'])[0]
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir, 0o755)
+
         handler = logging.handlers.RotatingFileHandler(config['log_path'], mode='a',
-                                                       maxBytes=10485760, backupCount=5)
+                                                       maxBytes=1048576, backupCount=5)
     else:
         # if no file or path configured, we just spew to standard err.
         handler = logging.StreamHandler()
@@ -85,7 +92,7 @@ def read_config():
     global config
 
     # Attempt to open the config file.
-    fstream = open('/etc/update_linux_hosts/update_linux_hosts.conf', 'r')
+    fstream = open('/etc/looms/scan_host_pkgs.conf', 'r')
 
     data = fstream.read()
     fstream.close()
@@ -101,7 +108,17 @@ def read_config():
 
             pair = line.split('=')
             opts = pair[0].strip().lower()
+            # Remove whitespace.
             value = pair[1].strip()
+
+            # Remove quotes if they fully surround the value; leave them in place if they don't in case they are
+            # an intended special character.
+            if value.startswith('"') and value.endswith('"'):
+                # Use slicing in case there is a "" pair at the start or end of the string.
+                value = value[1:-1]
+            if value.endswith("'") and value.endswith("'"):
+                # Use slicing in case there is a '' pair at the start or end of the string.
+                value = value[1:-1]
 
             # Some option values we expect to be fully lowercase; some can have upper.
             if opts == 'log_level':
@@ -110,7 +127,7 @@ def read_config():
                 config[opts] = value
             elif opts == 'ansible_vault_file':
                 config[opts] = value
-            elif opts == 'db_pass':
+            elif opts == 'opts_file':
                 config[opts] = value
             else:
                 print('Unknown option {0} in config file.'.format(line))
@@ -238,7 +255,7 @@ def check_db_for_host(machine_name):
     """
 
     # Establish our MySQL db connection.
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     # Check whether we have FQDN or short hostname.
@@ -278,7 +295,7 @@ def check_db_for_host_pkg(machine_name, package_name, package_version):
             -2 if the package does not exist in the database.
     """
 
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     query = """SELECT COUNT(*) FROM host AS h LEFT JOIN host_update_history AS huh ON h.id = huh.host_id
@@ -380,7 +397,7 @@ def insert_new_host(machine_name, setup_data):
     """
 
     # Open connection to MySQL
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     query = """INSERT INTO host (name, domain, os_name, os_version, dist_name, dist_ver)
@@ -431,7 +448,7 @@ def insert_package_version(pkg_data_list, ansible_facts):
                  'package_history table provisionally.'.format(pkg_data_list[0]))
 
     # Establish db connection.
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     facts = ansible_facts['ansible_facts']
@@ -497,7 +514,7 @@ def insert_pkg_host_association(machine_name, pkg_data_list, machine_data):
 
     logger.debug("Inserting pkg/host association.")
 
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     query = """INSERT INTO host_update_history (host_id, package_history_id, package_id)

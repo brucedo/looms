@@ -56,9 +56,9 @@ import pwd
 import grp
 
 root = '/srv/pkg_manager'
-libpath = '/usr/local/lib/looms/lib'
+libpath = '/usr/local/lib/python2.7/site-packages/looms/lib'
 repositories = {}
-keypath = '/etc/pkg_manager/keys'
+keypath = '/etc/looms/keys'
 public_keyring = 'pubring.gpg'
 private_keyring = 'secring.gpg'
 key_name = ''
@@ -68,12 +68,13 @@ default_owner = 'root'
 default_group = 'root'
 default_perms = 0o755
 default_sticky = False
-log_path = '/var/log/pkg_manager/pkg_manager.log'
+log_path = '/var/log/looms/pkg_manager.log'
 log_level = 'debug'
+opts_file = '/etc/looms/db_inf/pkg_manager.cnf'
 
 # Options for supporting plugins
-plugin_decl_dir = '/etc/pkg_manager/plugin_defs'
-plugins_dir = '/usr/local/lib/python2.7/site-packages'
+plugin_decl_dir = '/etc/looms/plugin_defs'
+plugins_dir = '/usr/local/lib/python2.7/site-packages/looms/pkg_manager/plugins'
 
 
 def load_conf(path):
@@ -105,6 +106,7 @@ def load_conf(path):
     global log_level
     global plugin_decl_dir
     global plugins_dir
+    global opts_file
 
     retval = 0
 
@@ -361,8 +363,18 @@ def load_conf(path):
             if os.path.exists(value):
                 plugins_dir = value
             else:
-                print("Plugin directory {0} specified on line {1} of the configuration file does not exists."
+                print("Plugin directory {0} specified on line {1} of the configuration file does not exist."
                       "Using {2} as default.".format(value, line_no, plugins_dir))
+        elif keyword == 'opts_file':
+            if section != 'Global':
+                retval = -2
+                print("Database Opts file must be specified in Global section, not repo.")
+                break
+            if os.path.exists(value):
+                opts_file = value
+            else:
+                print("Opts file {0} specified on line {1} of the configuration file does not exist."
+                      "Using {2} as default.".format(value, line_no, opts_file))
         else:
             if section == 'Global':
                 retval = -2

@@ -13,6 +13,8 @@ import mysql.connector.errors
 import shlex
 import json
 import subprocess
+import os
+import os.path
 
 config = {}
 logger = None
@@ -40,8 +42,13 @@ def setup_logging():
 
     # Creates rotating file handler, with a max size of 10 MB and maximum of 5 backups, if path configured.
     if config['update_hosts_log_path'] != '':
+        # Confirm the log path exists.
+        log_dir = os.path.split(config['update_hosts_log_path'])[0]
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir, 0o755)
+
         handler = logging.handlers.RotatingFileHandler(config['update_hosts_log_path'], mode='a',
-                                                       maxBytes=10485760, backupCount=5)
+                                                       maxBytes=1048576, backupCount=5)
     else:
         # if no file or path configured, we just spew to standard err.
         handler = logging.StreamHandler()
@@ -87,7 +94,7 @@ def read_config():
     global config
 
     # Attempt to open the config file.
-    fstream = open('/etc/update_linux_hosts/update_linux_hosts.conf', 'r')
+    fstream = open('/etc/looms/host_updater.conf', 'r')
 
     data = fstream.read()
     fstream.close()
@@ -105,6 +112,13 @@ def read_config():
             opts = pair[0].strip().lower()
             value = pair[1].strip()
 
+            # Get rid of enclosing quotes (but only if they are enclosing.)
+            if value.startswith('"') and value.endswith('"'):
+                value = value[1:-1]
+
+            if value.startswith("'") and value.endswith("'"):
+                value = value[1:-1]
+
             # Some option values we expect to be fully lowercase; some can have upper.
             if opts == 'log_level':
                 config[opts] = value.lower()
@@ -112,7 +126,9 @@ def read_config():
                 config[opts] = value
             elif opts == 'ansible_vault_file':
                 config[opts] = value
-            elif opts == 'db_pass':
+            elif opts == 'ansible_repo':
+                config[opts] = value
+            elif opts == 'opts_file':
                 config[opts] = value
             else:
                 print('Unknown option {0} in config file.'.format(line))
@@ -140,7 +156,7 @@ def get_outdated_systems():
     yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
     logger.debug('Getting datetime value to put into query: {0}'.format(yesterday))
 
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     cursor.execute(query, (yesterday, ))
@@ -234,6 +250,7 @@ def update_systems(package_name, version, machine_list):
         print("Exception occurred during subprocess call - result was {0}.".format(err.output))
         print("Command executed: {0}".format(err.cmd))
         print("Arguments passed: {0}".format(err.args))
+        return None
 
     return output
 
@@ -319,7 +336,7 @@ def confirm_package_details(package, arch, version):
     """
 
     # Establish db connection.
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     # First check if the package exists..
@@ -376,7 +393,7 @@ def insert_host_pkg_update(host_dict):
     """
 
     # Establish db connection.
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     # Iterate across the host package list.
@@ -460,8 +477,8 @@ def main():
     # join the machine list/domain name tuples and then string together into comma separated string form.
     env_machine = "hostnames=" + ','.join(['.'.join(x) for x in record_set])
     # Ansible command:
-    cmd = 'ansible-playbook /data/ansible/playbooks/test/daily_update.yaml --vault-password-file {1} ' \
-          '--verbose --extra-vars="{0}"'.format(env_machine, config['ansible_vault_file'])
+    cmd = 'ansible-playbook {2}/daily_update.yaml --vault-password-file {1} ' \
+          '--verbose --extra-vars="{0}"'.format(env_machine, config['ansible_vault_file'], config['ansible_repo'])
     try:
         output = subprocess.check_output(shlex.split(cmd))
     except subprocess.CalledProcessError as err:

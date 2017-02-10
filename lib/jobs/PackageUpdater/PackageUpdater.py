@@ -1,4 +1,4 @@
-from looms.lib.jobs.jobs import Job
+from lib.jobs.jobs import Job
 import subprocess
 import shlex
 import datetime
@@ -18,7 +18,7 @@ class PackageUpdater(Job):
 
         super(PackageUpdater, self).__init__()
 
-        self.script_path = '/data/programs/usr/local/bin/pkg_manager/pkg_manager.py'
+        self.script_path = '/usr/lib/python2.7/site-packages/looms/pkg_manager/pkg_manager.py'
 
     def run(self):
         """

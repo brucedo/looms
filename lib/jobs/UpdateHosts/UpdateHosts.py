@@ -1,4 +1,4 @@
-from looms.lib.jobs.jobs import Job
+from lib.jobs.jobs import Job
 import datetime
 import mysql.connector
 import subprocess
@@ -19,7 +19,7 @@ class UpdateHosts(Job):
 
         super(UpdateHosts, self).__init__()
 
-        self.script_path = '/data/programs/usr/local/bin/update_linux_hosts/update_hosts.py'
+        self.script_path = '/usr/lib/python2.7/site-packages/looms/host_updater/host_updater.py'
         self.query = """SELECT COUNT(*) AS count
                         FROM host_package_versions AS hpv
                         LEFT JOIN current_package_versions AS cpv ON cpv.package_id = p.id
@@ -35,7 +35,7 @@ class UpdateHosts(Job):
         print("Running Update Host with new packages at datetime {0}".format(datetime.datetime.now()))
 
         # Open connection to database.
-        connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+        connection = mysql.connector.connect(option_files='/etc/looms/db_inf/update_host_job.cnf')
         cursor = connection.cursor()
 
         # Date and time to check - now, but less a day.

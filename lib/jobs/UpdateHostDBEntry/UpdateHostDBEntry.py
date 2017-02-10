@@ -1,4 +1,4 @@
-from looms.lib.jobs.jobs import Job
+from lib.jobs.jobs import Job
 import os
 import subprocess
 import shlex
@@ -19,7 +19,7 @@ class UpdateHostDBEntry(Job):
 
         super(UpdateHostDBEntry, self).__init__()
 
-        self.script_path = '/data/programs/usr/local/bin/update_linux_hosts/update_host_db.py'
+        self.script_path = '/usr/lib/python2.7/site-packages/looms/sync_host_db/sync_host_db.py'
         self.data_file = '/data/call_home/registered_hosts'
 
     def run(self):

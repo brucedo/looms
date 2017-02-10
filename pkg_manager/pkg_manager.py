@@ -67,7 +67,7 @@ add_pkg_name = ''
 del_pkg_name = ''
 add_key_file = ''
 del_key_signature = ''
-conf_file = '/etc/pkg_manager/pkg_manager.conf'
+conf_file = '/etc/looms/pkg_manager.conf'
 
 logger = None
 log_level = None
@@ -88,6 +88,12 @@ def setup_logs():
 
     # Creates rotating file handler, with a max size of 10 MB and maximum of 5 backups, if path configured.
     if conf.pkg_manager.log_path != '':
+        # Ensure that the path to the log file actually exists, and create it if it does not.
+        log_dir = os.path.split(conf.pkg_manager.log_path)[0]
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        # Now point the handler to the log file.
         handler = logging.handlers.RotatingFileHandler(conf.pkg_manager.log_path, mode='a',
                                                        maxBytes=10485760, backupCount=5)
     else:
@@ -412,7 +418,7 @@ def update_database(api_pkg_data, repository_name):
 
     global logger
     # Establish our MySQL db connection.
-    connection = mysql.connector.connect(option_files='/etc/pkg_manager/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=conf.pkg_manager.opts_file)
     cursor = connection.cursor()
     update_type = ''
 

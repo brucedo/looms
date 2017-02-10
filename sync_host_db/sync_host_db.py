@@ -19,12 +19,15 @@ import pwd
 import grp
 import datetime
 
-allowed_opts = ['log_level', 'update_host_db_log_path', 'db_name', 'db_pass',
-                'reg_host_file', 'environment']
+allowed_opts = ['log_level', 'log_path', 'db_name', 'db_pass',
+                'reg_host_file', 'ansible_environment', 'opts_file']
 config = {}
 
+logger = ""
+log_level = ""
 
-def read_config(path='/etc/looms/update_host_db.conf'):
+
+def read_config(path='/etc/looms/sync_host_db.conf'):
     """
     Reads the config file located in /etc/update_linux_hosts.  Config file currently consists of password related
     options and some logging odds and ends.  Config file is standard ini file style - option = value.  Note that
@@ -52,13 +55,24 @@ def read_config(path='/etc/looms/update_host_db.conf'):
 
             pair = line.split('=')
             opts = pair[0].strip().lower()
+            # Get rid of any whitespace or enclosing quotations.
             value = pair[1].strip()
 
-            # Some option values we expect to be fully lowercase; some can have upper.
-            if opts in allowed_opts:
-                config[opts] = value.lower()
-            else:
+            # Remove quotes if they fully surround the value; leave them in place if they don't in case they are
+            # an intended special character.
+            if value.startswith('"') and value.endswith('"'):
+                # Use slicing in case there is a "" pair at the start or end of the string.
+                value = value[1:-1]
+            if value.endswith("'") and value.endswith("'"):
+                # Use slicing in case there is a '' pair at the start or end of the string.
+                value = value[1:-1]
+
+            # Some option values we expect to be fully lowercase; some can have upper.  Take the user's input at their
+            # word.
+            if opts not in allowed_opts:
                 print('Unknown option {0} in config file.'.format(line))
+            else:
+                config[opts] = value
 
 
 def setup_logging():
@@ -75,9 +89,15 @@ def setup_logging():
     conf_log_level = config['log_level']
 
     # Creates rotating file handler, with a max size of 10 MB and maximum of 5 backups, if path configured.
-    if config['update_host_db_log_path'] != '':
-        handler = logging.handlers.RotatingFileHandler(config['update_host_db_log_path'], mode='a',
-                                                       maxBytes=10485760, backupCount=5)
+    if config['log_path'] != '':
+        # Make sure the log path actually exists; if not, create it.
+        log_dir = os.path.split(config['log_path'])[0]
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir, 0o755)
+
+        # Now set up the rotating file handler.
+        handler = logging.handlers.RotatingFileHandler(config['log_path'], mode='a',
+                                                       maxBytes=1048576, backupCount=5)
     else:
         # if no file or path configured, we just spew to standard err.
         handler = logging.StreamHandler()
@@ -147,7 +167,12 @@ def get_record(file_stream):
     print record_str
 
     if record_str != '':
-        record = json.loads(record_str)
+        try:
+            record = json.loads(record_str)
+        except ValueError:
+            logger.error("A malformed JSON record has been found.  It is being skipped.  "
+                         "Record is: {0}".format(record_str))
+            record = {"Status": "invalid"}
 
     return record
 
@@ -162,7 +187,7 @@ def is_present(hostname, domain):
     """
 
     # Establish our MySQL db connection.
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     query = 'SELECT COUNT(*) FROM host WHERE host.name = %s AND host.domain = %s'
@@ -190,7 +215,7 @@ def insert_host(hostname, domain, os_name, os_ver, dist_name, dist_ver, checkin_
     :return:
     """
 
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     query = """INSERT INTO host (name, domain, os_name, os_version, dist_name, dist_ver, last_checkin)
@@ -215,7 +240,7 @@ def clear_update_history(hostname, domain):
     :return:
     """
 
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     # Need to remove both the host_update_history AND the host_package_versions entries.
@@ -243,7 +268,7 @@ def update_checkin_datestamp(hostname, domain, datestamp):
     :return:
     """
 
-    connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+    connection = mysql.connector.connect(option_files=config['opts_file'])
     cursor = connection.cursor()
 
     query = """UPDATE host SET last_checkin = %s WHERE name = %s AND domain = %s"""
@@ -270,7 +295,15 @@ def fix_known_hosts(hostname, domain):
 
     # Remove any existing references.
     fqdn = hostname + '.' + domain
-    ip = socket.gethostbyname(fqdn)
+
+    # If the host does not exist in the DNS and therefore we cannot get any IP address for it, then we should not
+    # try to clear it from the ssh keylist.  It may just be the computer is off network for a short period of time
+    # but will return with its SSH keys intact.
+    try:
+        ip = socket.gethostbyname(fqdn)
+    except socket.gaierror:
+        return
+
     cmd = 'ssh-keygen -R {0}{1}'
 
     # Clear any existence of the hostname and ip, if they exist.
@@ -314,12 +347,10 @@ def fix_ansible_hosts(hostname, domain):
 
     logger.debug('group_prefix is: {0}'.format(group_prefix))
 
-    if config['environment'] == 'test':
-        group_suffix = 'TestSystems'
-    elif config['environment'] == 'prod':
-        group_suffix = 'ProdSystems'
-    else:
-        logger.error('Config option environment={0} is not value test or prod.'.format(config['environment']))
+    try:
+        group_suffix = config['ansible_environment']
+    except KeyError:
+        logger.error('Config option ansible_environment is not set in the options file.')
         return False
 
     group = '[' + group_prefix + group_suffix + ']'
@@ -367,6 +398,10 @@ def delete_host_vars(hostname, domain):
     except IOError as err:
         # No real errors to log...if the file didn't exist, then we're perfectly fine anyways.  Just note it for
         # possible issues.
+        logger.error('Attempt to remove host_vars file {0}.{1} failed - '
+                     'it may not have existed.'.format(hostname, domain))
+    except OSError as err:
+        # Not sure if IOError ever gets raised or not, but leaving it in case it does.
         logger.error('Attempt to remove host_vars file {0}.{1} failed - '
                      'it may not have existed.'.format(hostname, domain))
 
@@ -425,6 +460,13 @@ def main():
     json_record = get_record(fd)
 
     while json_record:
+        # A short sanity check to deal with cases where a broken record has been reported in.
+        if ("Status" in json_record) and (json_record["Status"] == "invalid"):
+            # Just get the next record, record the broken record, and continue one.
+            json_record = get_record(fd)
+            logger.error("The record returned by get_record is invalid.")
+            continue
+
         # Check if the system even exists in the db.  Cast hostname and domain to uppercase - it's possible that
         # the reply from the client appears in lower.
         hostname = json_record['Host'].split('.', 1)[0].upper()

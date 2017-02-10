@@ -7,6 +7,7 @@ The repository manager class does not (yet) inherit from a proper base class; in
 "just agree to keep a set of method names in the class."
 """
 
+
 import conf.pkg_manager
 import os.path
 import glob
@@ -20,7 +21,7 @@ import hashlib
 import StringIO
 import gzip
 import bz2
-import api.updated_pkg_data
+import data_api.updated_pkg_data
 
 
 logger = None
@@ -189,12 +190,13 @@ class DebianPkgManager:
         Attempts to update the local repository copy against the contents of the remote repository.  Refreshes the
         local index cache and ensures that the indices are cryptographically valid, then updates the actual package
         store and the local repository index files, signing and getting cryptohashes for each one.
-        :return: On successful update, a populated api.updated_pkg_data.UpdatedPackageData() object is returned.
+        :return: On successful update, a populated data_api.updated_pkg_data.UpdatedPackageData() object is
+                    returned.
                  On failure, None is returned.
         """
 
         done = False
-        updated_pkg_data = api.updated_pkg_data.UpdatedPackageData()
+        updated_pkg_data = data_api.updated_pkg_data.UpdatedPackageData()
 
         # We have to take into account the fact that some mirrors may be compromised and return non-verifiable
         # index files or packages.  We may have to restart the process, so the sync command will loop until all
@@ -349,8 +351,10 @@ class DebianPkgManager:
             if not os.path.exists(directory):
                 retval = False
                 os.makedirs(directory, conf.pkg_manager.default_perms)
-                owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-                group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+                owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+                    conf.pkg_manager.default_owner else -1
+                group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+                    conf.pkg_manager.default_group else -1
                 os.chown(self.root, owner, group)
 
         return retval
@@ -431,8 +435,10 @@ class DebianPkgManager:
         fd.close()
 
         # Change owner of the file to the default, to be safe.
-        owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-        group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+        owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+            conf.pkg_manager.default_owner else -1
+        group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+            conf.pkg_manager.default_group else -1
         os.chown(self.whitelist_file, owner, group)
 
     def add_to_whitelist(self, pkg_name, component_category_dict):
@@ -622,8 +628,10 @@ class DebianPkgManager:
             fd.close()
 
             # Change the owner of the file to the default.
-            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+                conf.pkg_manager.default_owner else -1
+            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+                conf.pkg_manager.default_group else -1
             os.chown(local_package_path, owner, group)
 
     def update_cached_release(self, force=False):
@@ -676,8 +684,10 @@ class DebianPkgManager:
             fd.close()
 
             # Change release file owner to default.
-            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+                conf.pkg_manager.default_owner else -1
+            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+                conf.pkg_manager.default_group else -1
             os.chown(os.path.join(self.cache_dir, cached_release), owner, group)
 
             logger.debug('Writing file {0} to disk.'.format(os.path.join(self.cache_dir, cached_release_sig)))
@@ -685,12 +695,15 @@ class DebianPkgManager:
             fd.write(release_sig_data)
             fd.close()
 
-            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+                conf.pkg_manager.default_owner else -1
+            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+                conf.pkg_manager.default_group else -1
             os.chown(os.path.join(self.cache_dir, cached_release_sig), owner, group)
 
             # Now to verify the signature with one of the keys in the public keyring.
-            pubring = conf.pkg_manager.public_keyring if conf.pkg_manager.public_keyring != '' else None
+            pubring = conf.pkg_manager.public_keyring if \
+                conf.pkg_manager.public_keyring != '' else None
 
             gpg = gnupg.GPG(gnupghome=conf.pkg_manager.keypath, keyring=pubring)
 
@@ -841,13 +854,17 @@ class DebianPkgManager:
             return False
 
         # Change the owner of the release file.
-        owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-        group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+        owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+            conf.pkg_manager.default_owner else -1
+        group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+            conf.pkg_manager.default_group else -1
         os.chown(release_file, owner, group)
 
         # Get the Release file signed.  Get the default signing key data from the global config.
-        pubring = conf.pkg_manager.public_keyring if conf.pkg_manager.public_keyring != '' else None
-        secring = conf.pkg_manager.private_keyring if conf.pkg_manager.private_keyring != '' else None
+        pubring = conf.pkg_manager.public_keyring if \
+            conf.pkg_manager.public_keyring != '' else None
+        secring = conf.pkg_manager.private_keyring if \
+            conf.pkg_manager.private_keyring != '' else None
         homedir = conf.pkg_manager.keypath
         keyname = conf.pkg_manager.key_name
 
@@ -874,8 +891,10 @@ class DebianPkgManager:
             return False
 
         # Change the owner of the Release signature.
-        owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-        group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+        owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+            conf.pkg_manager.default_owner else -1
+        group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+            conf.pkg_manager.default_group else -1
         os.chown(release_gpg_file, owner, group)
 
         return True
@@ -905,8 +924,10 @@ class DebianPkgManager:
             # Create the path.
             os.makedirs(packages_path, conf.pkg_manager.default_perms)
             # Change ownership of directories.
-            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+                conf.pkg_manager.default_owner else -1
+            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+                conf.pkg_manager.default_group else -1
 
             temp = packages_path
             while temp != self.repo_dir:
@@ -982,8 +1003,10 @@ class DebianPkgManager:
         if bz2_stream:
             bz2_stream.close()
 
-        owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-        group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+        owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+            conf.pkg_manager.default_owner else -1
+        group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+            conf.pkg_manager.default_group else -1
         os.chown(os.path.join(packages_path, 'Packages'), owner, group)
         os.chown(os.path.join(packages_path, 'Packages.gz'), owner, group)
         os.chown(os.path.join(packages_path, 'Packages.bz2'), owner, group)
@@ -1079,8 +1102,10 @@ class DebianPkgManager:
             file_stream.write(pkg_data)
             file_stream.close()
 
-            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if conf.pkg_manager.default_owner else -1
-            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if conf.pkg_manager.default_group else -1
+            owner = pwd.getpwnam(conf.pkg_manager.default_owner)[2] if \
+                conf.pkg_manager.default_owner else -1
+            group = grp.getgrnam(conf.pkg_manager.default_group)[2] if \
+                conf.pkg_manager.default_group else -1
             os.chown(full_path, owner, group)
 
             # We want the top of the pool directory relative to the root of the web-exposed directory.  The pool
@@ -1128,14 +1153,15 @@ class DebianPkgManager:
             new_version = package['Version']
             try:
                 old_version = old_pkg_cont[pkg_name]['Version']
-            except:
+            except KeyError:
                 # Trivial case - the package does not exist in old_pkg_cont.  Add it to updated list and move on.
                 logger.debug('Package {0} does not exist in old_pkg_cont - adding to update list.'.format(pkg_name))
                 updated_list.append(package)
                 continue
 
             if pkg_name == 'libcurl3-gnutls':
-                print('Comparing package {0}: new versions {1}, old version {2}'.format(pkg_name, new_version, old_version))
+                print('Comparing package {0}: new versions {1}, old version '
+                      '{2}'.format(pkg_name, new_version, old_version))
 
             # Have the new version and the old version strings ready.
             logger.debug("Comparing against new package %s, version %s.", pkg_name, new_version)
@@ -1178,7 +1204,8 @@ class DebianPkgManager:
                 updated_list.append(package)
                 logger.debug("New version is higher; replace newest and check next package.")
                 if pkg_name == 'libcurl3-gnutls':
-                    print('New version is higher; the new version has been added to the updated_list of package objects.')
+                    print('New version is higher; the new version has been added to '
+                          'the updated_list of package objects.')
                 continue
 
             # If there are debian versions, test those.
@@ -1193,7 +1220,8 @@ class DebianPkgManager:
                 updated_list.append(package)
                 logger.debug("New version is higher; replace newest and check next package.")
                 if pkg_name == 'libcurl3-gnutls':
-                    print('New version debian section is higher; the new package object has been added to updated_list.')
+                    print('New version debian section is higher; the new package object '
+                          'has been added to updated_list.')
                 continue
 
         return updated_list

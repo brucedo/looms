@@ -1,4 +1,4 @@
-from looms.lib.jobs.jobs import Job
+from lib.jobs.jobs import Job
 import mysql.connector
 import datetime
 import subprocess
@@ -22,7 +22,7 @@ class HostPackageScan(Job):
         self.query = """SELECT h.name, h.domain FROM host AS h
                    LEFT OUTER JOIN host_update_history AS huh ON h.id = huh.host_id
                    WHERE huh.id IS NULL;"""
-        self.script_path = '/data/programs/usr/local/bin/update_linux_hosts/pkgscan_linux_host.py'
+        self.script_path = '/usr/lib/python2.7/site-packages/looms/scan_host_pkgs/scan_host_pkgs.py'
 
     def run(self):
         """
@@ -34,7 +34,7 @@ class HostPackageScan(Job):
 
         print("Running the host package scan at datetime: {0}".format(datetime.datetime.now()))
 
-        connection = mysql.connector.connect(option_files='/etc/update_linux_hosts/db_info/options.cnf')
+        connection = mysql.connector.connect(option_files='/etc/looms/db_inf/host_package_scan_job.cnf')
         cursor = connection.cursor()
 
         cursor.execute(self.query)

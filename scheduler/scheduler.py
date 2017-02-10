@@ -18,10 +18,10 @@ import logging.handlers
 import sys
 import signal
 import atexit
-from looms.lib.jobs.PackageUpdater import PackageUpdater
-from looms.lib.jobs.HostPackageScan import HostPackageScan
-from looms.lib.jobs.UpdateHostDBEntry import UpdateHostDBEntry
-from looms.lib.jobs.UpdateHosts import UpdateHosts
+from lib.jobs.PackageUpdater import PackageUpdater
+from lib.jobs.HostPackageScan import HostPackageScan
+from lib.jobs.UpdateHostDBEntry import UpdateHostDBEntry
+from lib.jobs.UpdateHosts import UpdateHosts
 
 # Set a few globals here.  At the moment we're not reading in any config files when we start, which should be fixed.
 # however, until then, we'll just cheap out and set some globals.
@@ -48,7 +48,7 @@ def setup_logs():
 
     # Creates rotating file handler, with a max size of 10 MB and maximum of 5 backups, if path configured.
     handler = logging.handlers.RotatingFileHandler(logfile, mode='a',
-                                                   maxBytes=10485760, backupCount=5)
+                                                   maxBytes=1048576, backupCount=5)
 
     if handler is None:
         print("A serious error occurred while attempting to create the logging handler.")
@@ -96,7 +96,7 @@ def main():
     # item in the passed array.
     try:
         action = sys.argv[1]
-    except IndexError as e:
+    except IndexError:
         print_help()
         sys.exit(1)
 
@@ -178,6 +178,11 @@ def start():
 
     global pidfile
     global logger
+
+    # Check before anything else to be sure that the path to the pidfile exists.
+    pid_dir = os.path.split(pidfile)[0]
+    if not os.path.exists(pid_dir):
+        os.makedirs(pid_dir)
 
     if os.path.exists(pidfile):
         # pidfile exists, so either a dirty shutdown occurred and the pidfile was not cleansed, or else a process
