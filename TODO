@@ -1,0 +1,65 @@
+List of tasks
+ - All
+   - Reconfigure services to launch and run under non-root ID.
+   - Restructure libraries in a sensible fashion.
+     - Currently libraries are spread across looms/lib and looms/common.  All should be within looms/lib.
+     - Importing is inconsistent across all tools.
+ - Database
+   - Begin looking at creating canned queries rather than hand written in each tool.
+ - Scheduler
+   - Set up unix socket for communication.  Develop communication protocol.
+   - Reconfigure service to not sleep for the full period in between job runs
+     - We want it to wake on signal and on socket inputs.  What can be done here...
+   - Statically created and run jobs (nightly package update etc) should be moved into config and out of code.
+   - Arbitrary job inputs.  Jobs should be insertable at any time into the existing job list (facilitates web interface.)
+   - Job Chains - sets of jobs that must be done in order.  This allows us to guarantee that any system we need to
+     connect to with Ansible will have the latest connection data stored.
+   - General cleanup.  A lot of unhandled or poorly handled error conditions.
+ - sync_host_db
+   - Re-examine the JSON parser.  Searching for the close of a record is a bit awkward and limits the input formats.
+   - The .ssh/known_hosts handler is poor quality - just takes the output of ssh-keyscan and dumps it into the known_hosts 
+     file.  No effort to remove comments or ensure that the output is set up well is made.
+ - scan_host_pkgs
+   - scan_host_pkgs has a bit of an issue with computers that are inaccessible, such as the CFIA systems immediately after 
+     creation.  The current workaround is to check for ping response and skip the system if no response comes back.  This may need 
+     work.
+   - Currently scan_host_pkgs takes package names or versions that it does not recognize and pushes them into the DB with a
+     January 1st 1970 date as the only indication that these are unknown packages.  The tool should be modified to handle these
+     differently; the DB may need modification to handle these changes.  Ideally the tool does not need to care if the package is
+     known or unknown - it just pushes a note to the DB indicating this package and version found, and the DB handles the 
+     match/mismatch either implicitly, or explicitly.
+ - host_updater
+   - host_updater is performing a simple shortcut setup - running a remote dpkg on the system.  This is semi effective, 
+     but not really awesome.
+     - Idealy, host_updater would group updates into common groups, and update all hosts who needed that package at the same time.
+       This is entirely dependent on the host package data being up to date, and the current package version data being up to date.
+       Basically, it's probably too fragile without other dependencies being in place first.
+     - We're not removing superceded packages (eg. old kernels.)  This should be done as needed.
+   - In general this tool isn't amazingly well thought out or done.  Consider re-envisioning the job it does and rebuilding.
+ - pkg_manager
+   - Ambitious concept, but never fully expanded out.
+   - Should consider whether or not these packages should be bundled into one monolithic app, or broken down into a few separate
+     smaller tools.
+   - Is intended to handle keys, whitelists, repos and repo URIs; does none of that quite properly. 
+     - add/delete package from whitelist: The whitelist is currently a single file of packages maintained on the filesystem.
+       Consider moving it to db, making it readily available to any other tool that wants to check whitelist status.  Also, could
+       be used by package tables as an fkey to match a package table entry against, and determine if it's valid.
+        - Same idea could be done simply by adding a boolean field WHITELIST to package table.  Consider if there's any need.
+     - add/delete gpg key: GPG key management is an important part of this tool.  GPG pub/priv pairs are needed for packages we
+       are hosting; GPG pub keys are needed to verify packages we download.  Ideally we would want to manage them with package
+       manager, so everything is created and saved to the correct location without possibility of mistake.
+     - add/del mirror URI - for any given repository name or names we want to be able to add repository addresses.
+   - Current mirror handling is atrocious and lazy - just a fall through scheme.  A mis-matched signature on one package means
+     that the mirror is rejected for all future packages, despite all past ones having been valid.  A better solution would be 
+     allow x failures from a given mirror before rejecting it entirely; if all mirrors fail the same package, though, then
+     that package may just be bad and perhaps should not be counted towards the failure count.  (note that this test is not
+     particularly useful if there is only one mirror for a repo!!!)
+   - Additional plugins need to be written to handle different repo types!  RPM should be a priority.
+ - Installer
+   - Currently installation happens by hand.  A full list of steps that must be taken to install have been recorded and reside
+     within the installer's docstring comments.  A reasonable implementation of this must be done.  Can make/make install be
+     used instead?  Maybe...look into this.
+ - TESTING
+   - OH MY GOD SO MUCH WORK NEEDS TO BE DONE TO BUILD UNIT TESTS AND STUFF
+   - AHHH THERE'S SO MUCH
+     
