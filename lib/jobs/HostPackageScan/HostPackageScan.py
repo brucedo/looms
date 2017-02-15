@@ -32,12 +32,46 @@ class HostPackageScan(Job):
         :return:
         """
 
-        print("Running the host package scan at datetime: {0}".format(datetime.datetime.now()))
+        self.log_string += "Running the host package scan at datetime: {0}\n".format(datetime.datetime.now())
 
-        connection = mysql.connector.connect(option_files='/etc/looms/db_inf/host_package_scan_job.cnf')
-        cursor = connection.cursor()
+        try:
+            connection = mysql.connector.connect(option_files='/etc/looms/db_inf/host_package_scan_job.cnf')
+        except mysql.connector.Error as err:
+            time = datetime.datetime.now()
+            self.log_string += "{0} - An error occurred when establishing a connection to the database.\n".format(time)
+            self.log_string += "Error Number: {0}\n".format(err.errno)
+            self.log_string += "SQLSTATE: {0}\n".format(err.sqlstate)
+            self.log_string += "Error Message: {0}\n".format(err.msg)
+            self.error_state = 1
+            self.update_next_run()
+            return
 
-        cursor.execute(self.query)
+        try:
+            cursor = connection.cursor()
+        except mysql.connector.Error as err:
+            time = datetime.datetime.now()
+            self.log_string += "{0} - An error occurred while creating a cursor.\n".format(time)
+            self.log_string += "Error Number: {0}\n".format(err.errno)
+            self.log_string += "SQLSTATE: {0}\n".format(err.sqlstate)
+            self.log_string += "Error Message: {0}\n".format(err.msg)
+            self.error_state = 2
+            self.update_next_run()
+            connection.close()
+            return
+
+        try:
+            cursor.execute(self.query)
+        except mysql.connector.Error as err:
+            time = datetime.datetime.now()
+            self.log_string += "{0} - An error occurred while executing query \"{1}\".\n".format(time, self.query)
+            self.log_string += "Error Number: {0}\n".format(err.errno)
+            self.log_string += "SQLSTATE: {0}\n".format(err.sqlstate)
+            self.log_string += "Error Message: {0}\n".format(err.msg)
+            self.error_state = 3
+            self.update_next_run()
+            cursor.close()
+            connection.close()
+            return
 
         # Execute the query
         machine_list = []
@@ -45,17 +79,31 @@ class HostPackageScan(Job):
             machine_list.append(machine_name + '.' + domain)
 
         if len(machine_list) <= 0:
-            print("No machines in the database require package scanning.")
+            time = datetime.datetime.now()
+            self.log_string += "{0} - No machines in the database require package scanning.\n".format(time)
+            self.update_next_run()
+            cursor.close()
+            connection.close()
             return
 
         # Remove any extraneous commas.
         machine_str = ','.join(machine_list)
 
-        print("Found machines {0} to scan.".format(machine_str))
+        time = datetime.datetime.now()
+        self.log_string += "{1} - Found machines {0} to scan.".format(machine_str, time)
 
         cmd = self.script_path + ' ' + machine_str
 
-        subprocess.call(shlex.split(cmd))
+        try:
+            subprocess.call(shlex.split(cmd))
+        except subprocess.CalledProcessError as err:
+            time = datetime.datetime.now()
+            self.log_string += "{0} - The called program {1} exited with a non-zero " \
+                               "return code.\n".format(time, self.script_path)
+            self.log_string += "Return Code: {0}\n".format(err.returncode)
+            self.log_string += "Error Message: {0}\n".format(err.message)
+            self.log_string += "Program output: {0}\n".format(err.output)
+            self.error_state = 4
 
         self.update_next_run()
 

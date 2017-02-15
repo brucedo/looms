@@ -18,10 +18,10 @@ import logging.handlers
 import sys
 import signal
 import atexit
-from lib.jobs.PackageUpdater import PackageUpdater
-from lib.jobs.HostPackageScan import HostPackageScan
-from lib.jobs.UpdateHostDBEntry import UpdateHostDBEntry
-from lib.jobs.UpdateHosts import UpdateHosts
+from looms.lib.jobs.PackageUpdater import PackageUpdater
+from looms.lib.jobs.HostPackageScan import HostPackageScan
+from looms.lib.jobs.UpdateHostDBEntry import UpdateHostDBEntry
+from looms.lib.jobs.UpdateHosts import UpdateHosts
 
 # Set a few globals here.  At the moment we're not reading in any config files when we start, which should be fixed.
 # however, until then, we'll just cheap out and set some globals.
@@ -151,6 +151,10 @@ def main():
     schedule = insert_job(update_host_db, schedule)
     schedule = insert_job(update_hosts, schedule)
 
+    # Give us a list of jobs and dates/times, to be sure we have everything recorded.
+    for job in schedule:
+        logger.debug("Running job {0} at time {1}".format(job.script_path, job.get_next_run_time()))
+
     while True:
         # Read the topmost job and get the amount of time before it runs.
         next_job_seconds = schedule[0].get_next_run_delta().total_seconds()
@@ -161,6 +165,18 @@ def main():
         job = schedule.pop(0)
         logger.debug("Running job {0}".format(job.script_path))
         job.run()
+
+        if job.error_state != 0:
+            logger.debug("An error occurred during the execution of this job.")
+            # Reset the error state for the next round
+            job.error_state = 0
+
+        # Regardless of whether or not the job failed, we kinda want to know what happened.
+        logger.debug(job.log_string)
+        # Empty the job log string.
+        job.log_string = ""
+
+
         insert_job(job, schedule)
 
 
@@ -345,13 +361,13 @@ def insert_job(job, schedule_list):
     """
 
     job_count = len(schedule_list)
-    print("Num jobs in queue: {0}".format(job_count))
+    logger.debug("Num jobs in queue: {0}".format(job_count))
 
     for i in range(0, job_count):
-        print("checking job {0}".format(i))
-        print ("new job {0} versus old job {1}".format(job.script_path, schedule_list[i].script_path))
-        print job.get_next_run_time()
-        print schedule_list[i].get_next_run_time()
+        logger.debug("checking job {0}".format(i))
+        logger.debug("new job {0} versus old job {1}".format(job.script_path, schedule_list[i].script_path))
+        logger.debug(job.get_next_run_time())
+        logger.debug(schedule_list[i].get_next_run_time())
         if job.get_next_run_time() < schedule_list[i].get_next_run_time():
             schedule_list.insert(i, job)
             break

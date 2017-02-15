@@ -140,20 +140,22 @@ def get_record(file_stream):
     :return: a JSON formatted data object containing the data of a single JSON record.
     """
 
+    global logger
+
     record_str = ''
     record = None
 
     # Read over the file line by line.
     for line in file_stream:
-        print("reading line {0}".format(line))
+        logger.debug("Reading line {0}".format(line))
         if not line:
-            print("Line is not, apparently.")
+            logger.debug("Line is empty line.  Skipping.")
             # File stream came to an end before hitting '}', or else we started end of line.
             # return the record all the same.
             return record
 
         if line.startswith('\n'):
-            print("line starts with a newline - empty.")
+            logger.debug("Line starts with a newline - empty.")
             # Empty line, it might happen.  Skip over and try the next line.
             continue
 
@@ -161,10 +163,10 @@ def get_record(file_stream):
         record_str += line
 
         if line == '}\n':
-            print("Line starts with a closing } and newline - end of record.")
+            logger.debug("Line starts with a closing brace and newline - end of record.")
             break
 
-    print record_str
+    logger.debug("Extracted record: {0} ".format(record_str))
 
     if record_str != '':
         try:
@@ -186,12 +188,45 @@ def is_present(hostname, domain):
              False if the system is NOT present in the database (it will have been added.)
     """
 
+    global logger
+
     # Establish our MySQL db connection.
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return False
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return False
 
     query = 'SELECT COUNT(*) FROM host WHERE host.name = %s AND host.domain = %s'
-    cursor.execute(query, (hostname, domain))
+
+    try:
+        cursor.execute(query, (hostname, domain))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return False
 
     exists = cursor.fetchone()[0]
 
@@ -215,8 +250,30 @@ def insert_host(hostname, domain, os_name, os_ver, dist_name, dist_ver, checkin_
     :return:
     """
 
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    global logger
+
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return False
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return False
 
     query = """INSERT INTO host (name, domain, os_name, os_version, dist_name, dist_ver, last_checkin)
             VALUES(%s, %s, %s, %s, %s, %s, %s)"""
@@ -224,7 +281,18 @@ def insert_host(hostname, domain, os_name, os_ver, dist_name, dist_ver, checkin_
     # Convert checkin_timestamp into a datetime object.  Reference: 29/08/2016 11:56:11
     checkin_datetime = datetime.datetime.strptime(checkin_timestamp, '%d/%m/%Y %H:%M:%S')
 
-    cursor.execute(query, (hostname, domain, os_name, os_ver, dist_name, dist_ver, checkin_datetime))
+    try:
+        cursor.execute(query, (hostname, domain, os_name, os_ver, dist_name, dist_ver, checkin_datetime))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return False
+
     connection.commit()
 
     cursor.close()
@@ -240,19 +308,62 @@ def clear_update_history(hostname, domain):
     :return:
     """
 
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    global logger
+
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return False
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return False
 
     # Need to remove both the host_update_history AND the host_package_versions entries.
     query = """DELETE hpv FROM host AS h LEFT JOIN host_package_versions AS hpv ON h.id = hpv.host_id
                WHERE h.name = %s AND h.domain = %s"""
 
-    cursor.execute(query, (hostname, domain))
+    try:
+        cursor.execute(query, (hostname, domain))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return False
 
     query = """DELETE huh FROM host AS h LEFT JOIN host_update_history AS huh ON h.id = huh.host_id
                WHERE h.name = %s and h.domain = %s"""
 
-    cursor.execute(query, (hostname, domain))
+    try:
+        cursor.execute(query, (hostname, domain))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return False
+
     connection.commit()
 
     cursor.close()
@@ -268,14 +379,47 @@ def update_checkin_datestamp(hostname, domain, datestamp):
     :return:
     """
 
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    global logger
+
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return False
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return False
 
     query = """UPDATE host SET last_checkin = %s WHERE name = %s AND domain = %s"""
 
     checkin_datetime = datetime.datetime.strptime(datestamp, '%d/%m/%Y %H:%M:%S')
 
-    cursor.execute(query, (checkin_datetime, hostname, domain))
+    try:
+        cursor.execute(query, (checkin_datetime, hostname, domain))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return False
+
     connection.commit()
 
     cursor.close()
@@ -290,6 +434,8 @@ def fix_known_hosts(hostname, domain):
     :param domain: Domain the remote system is on.
     :return:
     """
+
+    global logger
 
     home_ssh_dir = os.path.join(os.getenv('HOME'), '.ssh/known_hosts')
 
@@ -318,10 +464,16 @@ def fix_known_hosts(hostname, domain):
 
     # Create new reference.
     cmd = 'ssh-keyscan -p 34923 {0}'
-    print('Attempting to append known host fingerprint to file {0}'.format(home_ssh_dir))
+    logger.debug('Attempting to append known host fingerprint to file {0}'.format(home_ssh_dir))
     fd = open(home_ssh_dir, 'a')
 
-    subprocess.call(shlex.split(cmd.format(fqdn)), stdout=fd)
+    try:
+        subprocess.call(shlex.split(cmd.format(fqdn)), stdout=fd)
+    except subprocess.CalledProcessError as err:
+        logger.error("{0} - An error occurred while attempting to run {1}".format(datetime.datetime.now(), cmd))
+        logger.error("Return code: {0}".format(err.returncode))
+        logger.error("Message: {0}".format(err.message))
+        logger.error("Output: {0}".format(err.output))
 
     fd.close()
 
@@ -438,6 +590,7 @@ def main():
     """
 
     global config
+    global logger
 
     # Read in the config file and setup logs...
     read_config()
@@ -455,7 +608,7 @@ def main():
         exit(0)
 
     # Open the registered hosts file.
-    print("Opening the stupid file. {0}".format(config['reg_host_file']))
+    logger.debug("{1} - Attempting to open the file {0}".format(config['reg_host_file'], datetime.datetime.now()))
     fd = open(config['reg_host_file'], 'r+')
     json_record = get_record(fd)
 

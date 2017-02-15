@@ -29,13 +29,24 @@ class UpdateHostDBEntry(Job):
         :return:
         """
 
-        print("Running Update Host DB Entry job at datetime {0}".format(datetime.datetime.now()))
+        self.log_string += "{0} - Running Update Host DB Entry job\n".format(datetime.datetime.now())
 
         file_stats = os.stat(self.data_file)
 
         if file_stats.st_size > 0:
-            print("There are records in the php output!")
-            subprocess.call(shlex.split(self.script_path))
+            time = datetime.datetime.now()
+            self.log_string += "{0} - There are records in the php output!\n".format(time)
+
+            try:
+                subprocess.call(shlex.split(self.script_path))
+            except subprocess.CalledProcessError as err:
+                time = datetime.datetime.now()
+                self.log_string += "{0} - The called program {1} exited with a non-zero " \
+                                   "return code.\n".format(time, self.script_path)
+                self.log_string += "Return Code: {0}\n".format(err.returncode)
+                self.log_string += "Error Message: {0}\n".format(err.message)
+                self.log_string += "Program output: {0}\n".format(err.output)
+                self.error_state = 1
 
         # Update the next run time...
         self.update_next_run()

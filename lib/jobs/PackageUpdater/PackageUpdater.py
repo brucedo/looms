@@ -26,8 +26,17 @@ class PackageUpdater(Job):
         :return:
         """
 
-        print("Running the Package Updater script at datetime: {0}".format(datetime.datetime.now()))
+        self.log_string += "{0} - Running the Package Updater script.\n".format(datetime.datetime.now())
 
-        subprocess.call(shlex.split(self.script_path))
+        try:
+            subprocess.call(shlex.split(self.script_path))
+        except subprocess.CalledProcessError as err:
+            time = datetime.datetime.now()
+            self.log_string += "{0} - The called program {1} exited with a non-zero " \
+                               "return code.\n".format(time, self.script_path)
+            self.log_string += "Return Code: {0}\n".format(err.returncode)
+            self.log_string += "Error Message: {0}\n".format(err.message)
+            self.log_string += "Program output: {0}\n".format(err.output)
+            self.error_state = 1
 
         self.update_next_run()

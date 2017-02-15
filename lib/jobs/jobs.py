@@ -34,6 +34,11 @@ class Job(object):
         # The datetime object representing when the job will next run.
         self.next_run_time = None
 
+        # Error handling for each job, allowing any instantiator of a subclass to get the error state and a log of
+        # job behavior without each job needing to set up its own logging.
+        self.error_state = 0
+        self.log_string = ""
+
     @abc.abstractmethod
     def run(self):
         """
@@ -51,8 +56,8 @@ class Job(object):
         """
 
         if self.timer_type == 'absolute':
-            self.timer_base += self.timer
             self.next_run_time = self.timer_base + self.timer
+            self.timer_base += self.timer
         else:
             self.next_run_time = datetime.datetime.now() + self.timer
 

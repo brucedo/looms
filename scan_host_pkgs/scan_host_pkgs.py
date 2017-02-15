@@ -19,6 +19,7 @@ import mysql.connector.errors
 import json
 import os
 import os.path
+import datetime
 
 config = {}
 logger = None
@@ -142,6 +143,8 @@ def parse_dpkg_run(dpkg_output):
     version and architecture data for a single package.)
     """
 
+    global logger
+
     # Dictionary with machine names (fully qualified) as keys and a list of lists as values, where each sublist
     # represents one package, containing package name, version, and architecture.
     dpkg_dict = {}
@@ -226,6 +229,8 @@ def get_target_dpkg(target):
     """
 
     global config
+    global logger
+
     cmd_string = 'ansible -m command {0} --vault-password-file "{1}" ' \
                  '--args="dpkg -l"'.format(target, config['ansible_vault_file'])
 
@@ -254,16 +259,49 @@ def check_db_for_host(machine_name):
              table (it should only exist one time; the column itself is unique keyed.)
     """
 
+    global logger
+
     # Establish our MySQL db connection.
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return False
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return False
 
     # Check whether we have FQDN or short hostname.
     if machine_name.find('.') >= 0:
         machine_name = machine_name.split('.')[0]
 
     query = """SELECT COUNT(*) FROM host WHERE host.name = %s"""
-    cursor.execute(query, (machine_name, ))
+
+    try:
+        cursor.execute(query, (machine_name, ))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return False
 
     # Only getting COUNT back, no named column - should be only one row returned and only one column; should be
     # guaranteed to get exactly one row and exactly one column.
@@ -273,7 +311,7 @@ def check_db_for_host(machine_name):
     cursor.close()
     connection.close()
 
-    print("Count of {0}: {1}".format(machine_name, exists))
+    logger.debug("{2} - Number of systems named {0}: {1}".format(machine_name, exists, datetime.datetime.now()))
 
     if int(exists) == 1:
         return True
@@ -293,10 +331,34 @@ def check_db_for_host_pkg(machine_name, package_name, package_version):
             -1 if the package exists in the database and no version from the package_history table has been
     associated with the host.
             -2 if the package does not exist in the database.
+            -3 if there is a database error.
     """
 
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    global logger
+
+    # Establish our MySQL db connection.
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return -3
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return -3
 
     query = """SELECT COUNT(*) FROM host AS h LEFT JOIN host_update_history AS huh ON h.id = huh.host_id
                LEFT JOIN package_history AS ph ON huh.package_history_id = ph.id
@@ -308,7 +370,17 @@ def check_db_for_host_pkg(machine_name, package_name, package_version):
 
     logger.debug("Query: {0}".format(query % (hostname, domain, package_name, package_version)))
 
-    cursor.execute(query, (hostname, domain, package_name, package_version))
+    try:
+        cursor.execute(query, (hostname, domain, package_name, package_version))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return -3
 
     exists = cursor.fetchone()[0]
 
@@ -323,7 +395,19 @@ def check_db_for_host_pkg(machine_name, package_name, package_version):
         # table.
         query = """SELECT COUNT(*) FROM package AS p WHERE p.package_name = %s"""
         logger.debug("Query: {0}".format(query % (package_name, )))
-        cursor.execute(query, (package_name, ))
+
+        try:
+            cursor.execute(query, (package_name, ))
+        except mysql.connector.Error as err:
+            time = datetime.datetime.now()
+            logger.error("{0} - An error occurred while running query {1}".format(time, query))
+            logger.error("Error Number: {0}".format(err.errno))
+            logger.error("SQLSTATE: {0}".format(err.sqlstate))
+            logger.error("Error Message: {0}".format(err.msg))
+            cursor.close()
+            connection.close()
+            return -3
+
         exists = cursor.fetchone()[0]
 
         if exists > 0:
@@ -347,6 +431,8 @@ def query_system_setup(machine_name):
     :param machine_name: Name of the system whose setup data is to be retrieved.
     :return: A json dictionary object if successful; None if not.
     """
+
+    global logger
 
     cmd = 'ansible -m setup {0} --vault-password-file "{1}"'.format(machine_name, config['ansible_vault_file'])
 
@@ -396,9 +482,31 @@ def insert_new_host(machine_name, setup_data):
              False on failed update.
     """
 
+    global logger
+
     # Open connection to MySQL
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return -3
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return -3
 
     query = """INSERT INTO host (name, domain, os_name, os_version, dist_name, dist_ver)
                                  VALUES (%s, %s, %s, %s, %s, %s)"""
@@ -444,12 +552,34 @@ def insert_package_version(pkg_data_list, ansible_facts):
     :return:
     """
 
+    global logger
+
     logger.debug('Attempting to insert package data {0} into '
                  'package_history table provisionally.'.format(pkg_data_list[0]))
 
     # Establish db connection.
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return -3
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return -3
 
     facts = ansible_facts['ansible_facts']
 
@@ -479,7 +609,18 @@ def insert_package_version(pkg_data_list, ansible_facts):
     query = """SELECT COUNT(*) FROM package AS p LEFT JOIN package_history AS ph ON p.id = ph.package_id
                WHERE p.package_name = %s AND ph.version = %s AND p.contents = %s"""
 
-    cursor.execute(query, (pkg_data_list[0], pkg_data_list[1], arch))
+    try:
+        cursor.execute(query, (pkg_data_list[0], pkg_data_list[1], arch))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return -3
+
     exists = cursor.fetchone()[0]
 
     if exists > 0:
@@ -495,7 +636,18 @@ def insert_package_version(pkg_data_list, ansible_facts):
                FROM package
                WHERE package.package_name = %s AND package.package_type = %s AND package.contents = %s"""
 
-    cursor.execute(query, (date, pkg_data_list[1], event_type, pkg_data_list[0], pkg_type, arch))
+    try:
+        cursor.execute(query, (date, pkg_data_list[1], event_type, pkg_data_list[0], pkg_type, arch))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return -3
+
     connection.commit()
 
     cursor.close()
@@ -512,10 +664,32 @@ def insert_pkg_host_association(machine_name, pkg_data_list, machine_data):
     :return:
     """
 
+    global logger
+
     logger.debug("Inserting pkg/host association.")
 
-    connection = mysql.connector.connect(option_files=config['opts_file'])
-    cursor = connection.cursor()
+    logger.debug("{0} - Attempting to create MySQL connection.".format(datetime.datetime.now()))
+    try:
+        connection = mysql.connector.connect(option_files=config['opts_file'])
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred when establishing a connection to the database.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        return -3
+
+    logger.debug("{0} - Attempting to create MySQL cursor.".format(datetime.datetime.now()))
+    try:
+        cursor = connection.cursor()
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while creating a cursor.".format(time))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        connection.close()
+        return -3
 
     query = """INSERT INTO host_update_history (host_id, package_history_id, package_id)
                SELECT h.id, ph.id, p.id
@@ -539,9 +713,20 @@ def insert_pkg_host_association(machine_name, pkg_data_list, machine_data):
     pkg_type = 'debian'
     pkg_version = pkg_data_list[1]
 
-    logger.debug('Query: {0}'.format(query % (hostname, domain, pkg_name, pkg_contents, pkg_type, pkg_version, pkg_name, pkg_version)))
+    logger.debug('Query: {0}'.format(query % (hostname, domain, pkg_name, pkg_contents,
+                                              pkg_type, pkg_version, pkg_name, pkg_version)))
 
-    cursor.execute(query, (hostname, domain, pkg_name, pkg_contents, pkg_type, pkg_version, pkg_name, pkg_version))
+    try:
+        cursor.execute(query, (hostname, domain, pkg_name, pkg_contents, pkg_type, pkg_version, pkg_name, pkg_version))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return -3
 
     # We have the host->package version association created in the history table.  We need the same in the
     # host_package_versions table, because that IS the currently known package version associated with this host.
@@ -551,13 +736,43 @@ def insert_pkg_host_association(machine_name, pkg_data_list, machine_data):
                WHERE h.name = %s AND h.domain = %s AND p.package_name = %s AND p.contents = %s
                AND p.package_type = %s AND ph.version = %s
                ON DUPLICATE KEY UPDATE package_history_id = ph.id"""
-    cursor.execute(query, (hostname, domain, pkg_name, pkg_contents, pkg_type, pkg_version))
+
+    try:
+        cursor.execute(query, (hostname, domain, pkg_name, pkg_contents, pkg_type, pkg_version))
+    except mysql.connector.Error as err:
+        time = datetime.datetime.now()
+        logger.error("{0} - An error occurred while running query {1}".format(time, query))
+        logger.error("Error Number: {0}".format(err.errno))
+        logger.error("SQLSTATE: {0}".format(err.sqlstate))
+        logger.error("Error Message: {0}".format(err.msg))
+        cursor.close()
+        connection.close()
+        return -3
 
     # Commit the changes made.
     connection.commit()
 
     cursor.close()
     connection.close()
+
+
+def ping_test(hostname):
+    """
+    Attempts to ping the fully-qualified hostname to determine if it is present on the network now or not.
+    :param hostname: Name of the system whose network presence we want to test
+    :return: True if the system is present on the network
+             False if the system is not present on the network
+    """
+
+    cmd = "ping -c 1 {0}".format(hostname)
+
+    found = subprocess.call(shlex.split(cmd))
+
+    # The ping command's return code is 0 for a pinged system, and various non-zero if the system could NOT be pinged.
+    if found == 0:
+        return True
+    else:
+        return False
 
 
 def main():
@@ -568,6 +783,8 @@ def main():
     for the updater.
     :return:
     """
+
+    global logger
 
     # Read in the config file.
     read_config()
@@ -580,8 +797,23 @@ def main():
 
     # Iterate over systems in the target_list.
     for target in target_list:
+        # Check to be sure the target system is in fact present.
+        # This is a quick hack to get around a larger system problem with our design.  It means that we cannot pass
+        # Ansible groups to scan_host_pkgs, as they will never be pingable and therefore always be skipped.
+        logger.debug("Confirm system is awake and alive on network.")
+        host_list = []
+        for host in target.split(','):
+            # Cover the chance that an empty field exists.
+            if not host:
+                continue
+            present = ping_test(host)
+            if not present:
+                logger.warn("System {0} could not be pinged.  Skipping...".format(host))
+                continue
+            host_list.append(host)
         # Get the text report from the dpkg -l on the target set.
-        result = get_target_dpkg(target)
+        host_list = ",".join(host_list)
+        result = get_target_dpkg(host_list)
 
         # Break the text report down into successful runs and failures.  Return a dictionary value, where
         # the keys are the full system names, and the values are lists of package, version, architectures.
@@ -591,6 +823,7 @@ def main():
             # Check to see if they exist in host table.
             logger.debug("Checking machine {0}".format(machine))
             logger.debug("Number of packages for machine: {0}".format(len(dpkg_dict[machine])))
+
             if check_db_for_host(machine):
                 logger.debug('Machine {0} exists in the database - no need to add it.'.format(machine))
             else:
@@ -614,8 +847,6 @@ def main():
                 print('Package {0} associated with machine {1}: {2}'.format(package_data[0], machine, associated))
                 if associated == -2:
                     # If package does not exist, report it - future check for unauthorized software.
-                    print('Package {0} DOES NOT EXIST IN THE DATABASE!  This could be an unauthorized software '
-                          'package.  Please investigate.'.format(package_data[0]))
                     logger.warn('Package {0} DOES NOT EXIST IN THE DATABASE!  This could be an unauthorized '
                                 'software package.  Please investigate.'.format(package_data[0]))
                 elif associated == -1:
